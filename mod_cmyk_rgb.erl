@@ -8,11 +8,9 @@
 
 -mod_title("CMYK to RGB converter").
 -mod_description("CMYK to RGB converter.").
--mod_prio(500).
--mod_depends([base, admin]).
+-mod_prio(100).
 
 -include_lib("zotonic.hrl").
--include_lib("modules/mod_admin/include/admin_menu.hrl").
 
 -export([
     event/2
