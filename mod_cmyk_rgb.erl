@@ -16,25 +16,7 @@
     event/2
 ]).
 
-parseImageMagickInfo(Info, Key) ->
-    Lines = string:tokens(Info, "\r\n"),
-    Values = lists:map(fun(Line) ->
-        Parts = re:split(string:strip(Line), "\s?:\s?", [{return, list}]),
-        case Parts of 
-            [Key, Value] -> Value;
-            _ -> undefined
-        end
-    end, Lines),
-    first(Values, fun(E) when E =:= undefined -> false;
-        (_) -> true
-    end, undefined).
-
-first([E | Rest], Condition, Default) ->
-    case Condition(E) of
-        true -> E;
-        false -> first(Rest, Condition, Default)
-    end;
-first([], _Cond, Default) -> Default.
+    
 
 %% Submitted form
 event(#submit{message={upload, []}}, Context) ->
@@ -55,41 +37,9 @@ event(#submit{message={upload, []}}, Context) ->
         _ ->
             Cmd = "identify -verbose " ++ z_utils:os_filename(Target),
             ImageInfo = os:cmd(Cmd),
-%            Format = parseImageMagickInfo(ImageInfo, "Format"),
-%            lager:warning("Format: ~p", [Format]),
-%            FormatKey = lists:nth(1, string:tokens(Format, " ")),
- 
-            ColorSpace = parseImageMagickInfo(ImageInfo, "Colorspace"),
-            lager:warning("ColorSpace: ~p", [ColorSpace]),
-            
-            case ColorSpace of
-                "RGB" ->
-                    {ok, "File is already RGB", undefined};
-                "sRGB" ->
-                    {ok, "File is already RGB", undefined};
-                "CMYK" ->
-                    RGBFile = OriginalFilename ++ "-rgb" ++ "." ++ "png",
-                    Dir = z_path:files_subdir_ensure("archive/" ++ SUB_DIR, Context),
-                    OutputTarget = filename:join([Dir, RGBFile]),
-                    ConvertCmd = lists:flatten([
-                        "convert ",
-                        Target, " ",
-                        "-colorspace sRGB ",
-                        OutputTarget
-                    ]),
-                    lager:warning("ConvertCmd=~p", [ConvertCmd]),
-                    % execute imagemagick command
-                    z_media_preview_server:exec(ConvertCmd, OutputTarget),
-                    case filelib:is_regular(OutputTarget) of
-                        true ->
-                            {ok, "Converted CMYK to RGB", RGBFile};
-                        false ->
-                            {error, "Could not convert image to RGB", undefined}
-                    end;
-                _ ->
-                    {info, "Unknown color type, perhaps this is not an image.", undefined}
-                    %{info, "Unknown colorspace, keep as is.", undefined}
-            end
+            Format = parseImageMagickInfo(ImageInfo, "Format"),
+            FormatKey = lists:nth(1, string:tokens(Format, " ")),
+            handleImageFormat(FormatKey, ImageInfo, OriginalFilename, SUB_DIR, Target, Context)            
         end,
     
     file:delete(Target),
@@ -114,5 +64,66 @@ event(#submit{message={upload, []}}, Context) ->
 %    lager:warning("delete:~p", [Archive ++ File]),
 %    file:delete(Archive ++ "/" ++ File),
     Context3.
+
+
+parseImageMagickInfo(Info, Key) ->
+    Lines = string:tokens(Info, "\r\n"),
+    Values = lists:map(fun(Line) ->
+        Parts = re:split(string:strip(Line), "\s?:\s?", [{return, list}]),
+        case Parts of 
+            [Key, Value] -> Value;
+            _ -> undefined
+        end
+    end, Lines),
+    first(Values, fun(E) when E =:= undefined -> false;
+        (_) -> true
+    end, undefined).
+
+first([E | Rest], Condition, Default) ->
+    case Condition(E) of
+        true -> E;
+        false -> first(Rest, Condition, Default)
+    end;
+first([], _Cond, Default) -> Default.
+
+
+handleImageFormat(Format, ImageInfo, OriginalFilename, SubDir, Target, Context) when Format =:= "JPEG"; Format =:= "PNG"; Format =:= "TIFF" -> 
+    ColorSpace = parseImageMagickInfo(ImageInfo, "Colorspace"),
+    lager:warning("ColorSpace: ~p", [ColorSpace]),
+    case ColorSpace of
+        "RGB" ->
+            {ok, "Nothing to do: file is already RGB.", undefined};
+        "sRGB" ->
+            {ok, "Nothing to do: file is already RGB.", undefined};
+        "CMYK" ->
+            convertImage(OriginalFilename, SubDir, Target, Context);
+        _ ->
+            {info, "Unknown colorspace, keep as is.", undefined}
+    end;
+handleImageFormat(_, _, _, _, _, _) ->
+    {error, "Unsupported file format.", undefined}.
+            
+            
+%% convertImage(OriginalFilename, SubDir, InputFile, Context) -> {ok, Info:String, File:String} | {error, Reason:String, undefined}
+convertImage(OriginalFilename, SubDir, InputFile, Context) ->
+    OutputFile = OriginalFilename ++ "-rgb" ++ "." ++ "png",
+    Dir = z_path:files_subdir_ensure("archive/" ++ SubDir, Context),
+    OutputPath = filename:join([Dir, OutputFile]),
+    ConvertCmd = lists:flatten([
+        "convert ",
+        InputFile, " ",
+        "-colorspace sRGB ",
+        OutputPath
+    ]),
+    lager:warning("ConvertCmd=~p", [ConvertCmd]),
+    % execute imagemagick command
+    z_media_preview_server:exec(ConvertCmd, OutputPath),
+    case filelib:is_regular(OutputPath) of
+        true ->
+            {ok, "Converted CMYK to RGB.", OutputFile};
+        false ->
+            {error, "Could not convert image to RGB.", undefined}
+    end.
+
 
 
