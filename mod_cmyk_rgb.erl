@@ -21,28 +21,20 @@
 %% Submitted form
 event(#submit{message={upload, []}}, Context) ->
     #upload{filename=OriginalFilename, tmpfile=TmpFile} = z_context:get_q_validated("file", Context),
-
     SUB_DIR = "tmp",
-    
-    %% Move temporary file to processing directory
-    Dir = z_path:files_subdir_ensure("archive/" ++ SUB_DIR, Context),
-    Target = filename:join([Dir, OriginalFilename]),
-    file:delete(Target),
-    {ok, _} = file:copy(TmpFile, Target),
-    file:delete(TmpFile),
     
     Feedback = case TmpFile of
         [] ->
             {error, "No file"};
         _ ->
-            Cmd = "identify -verbose " ++ z_utils:os_filename(Target),
+            Cmd = "identify -verbose " ++ z_utils:os_filename(TmpFile),
             ImageInfo = os:cmd(Cmd),
             Format = parseImageMagickInfo(ImageInfo, "Format"),
             FormatKey = lists:nth(1, string:tokens(Format, " ")),
-            handleImageFormat(FormatKey, ImageInfo, OriginalFilename, SUB_DIR, Target, Context)            
+            handleImageFormat(FormatKey, ImageInfo, TmpFile, OriginalFilename, SUB_DIR, Context)            
         end,
     
-    file:delete(Target),
+    file:delete(TmpFile),
     
     AlertClass = case Feedback of 
         {ok, _, _} -> "alert alert-success";
@@ -56,7 +48,6 @@ event(#submit{message={upload, []}}, Context) ->
         undefined ->
             Context2;
         File -> 
-            lager:warning("download file ~p", [File]),
             z_render:wire({redirect, [{dispatch, "media_attachment"}, {star, SUB_DIR ++ "/" ++ File}]}, Context2)
     end,
     
@@ -87,16 +78,15 @@ first([E | Rest], Condition, Default) ->
 first([], _Cond, Default) -> Default.
 
 
-handleImageFormat(Format, ImageInfo, OriginalFilename, SubDir, Target, Context) when Format =:= "JPEG"; Format =:= "PNG"; Format =:= "TIFF" -> 
+handleImageFormat(Format, ImageInfo, TmpFile, OriginalFilename, SubDir, Context) when Format =:= "JPEG"; Format =:= "PNG"; Format =:= "TIFF" -> 
     ColorSpace = parseImageMagickInfo(ImageInfo, "Colorspace"),
-    lager:warning("ColorSpace: ~p", [ColorSpace]),
     case ColorSpace of
         "RGB" ->
             {ok, "Nothing to do: file is already RGB.", undefined};
         "sRGB" ->
             {ok, "Nothing to do: file is already RGB.", undefined};
         "CMYK" ->
-            convertImage(OriginalFilename, SubDir, Target, Context);
+            convertImage(TmpFile, OriginalFilename, SubDir, Context);
         _ ->
             {info, "Unknown colorspace, keep as is.", undefined}
     end;
@@ -104,10 +94,15 @@ handleImageFormat(_, _, _, _, _, _) ->
     {error, "Unsupported file format.", undefined}.
             
             
-%% convertImage(OriginalFilename, SubDir, InputFile, Context) -> {ok, Info:String, File:String} | {error, Reason:String, undefined}
-convertImage(OriginalFilename, SubDir, InputFile, Context) ->
-    OutputFile = OriginalFilename ++ "-rgb" ++ "." ++ "png",
+%% convertImage(TmpFile, OriginalFilename, SubDir, InputFile, Context) -> {ok, Info:String, File:String} | {error, Reason:String, undefined}
+convertImage(TmpFile, OriginalFilename, SubDir, Context) ->
+    %% Move temporary file to processing directory
     Dir = z_path:files_subdir_ensure("archive/" ++ SubDir, Context),
+    InputFile = filename:join([Dir, OriginalFilename]),
+    file:delete(InputFile),
+    {ok, _} = file:copy(TmpFile, InputFile),
+    
+    OutputFile = OriginalFilename ++ "-rgb" ++ "." ++ "png",
     OutputPath = filename:join([Dir, OutputFile]),
     ConvertCmd = lists:flatten([
         "convert ",
@@ -115,9 +110,9 @@ convertImage(OriginalFilename, SubDir, InputFile, Context) ->
         "-colorspace sRGB ",
         OutputPath
     ]),
-    lager:warning("ConvertCmd=~p", [ConvertCmd]),
     % execute imagemagick command
     z_media_preview_server:exec(ConvertCmd, OutputPath),
+    file:delete(InputFile),
     case filelib:is_regular(OutputPath) of
         true ->
             {ok, "Converted CMYK to RGB.", OutputFile};
