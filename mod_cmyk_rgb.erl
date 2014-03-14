@@ -30,8 +30,12 @@ event(#submit{message={upload, []}}, Context) ->
             Cmd = "identify -verbose " ++ z_utils:os_filename(TmpFile),
             ImageInfo = os:cmd(Cmd),
             Format = parseImageMagickInfo(ImageInfo, "Format"),
-            FormatKey = lists:nth(1, string:tokens(Format, " ")),
-            handleImageFormat(FormatKey, ImageInfo, TmpFile, OriginalFilename, SUB_DIR, Context)            
+            case Format of
+                undefined -> {error, "Unsupported file format.", undefined};
+                _ -> 
+                    FormatKey = lists:nth(1, string:tokens(Format, " ")),
+                    handleImageFormat(FormatKey, ImageInfo, TmpFile, OriginalFilename, SUB_DIR, Context)
+            end
         end,
     
     file:delete(TmpFile),
@@ -42,7 +46,7 @@ event(#submit{message={upload, []}}, Context) ->
         {error, _, _} -> "alert alert-danger"
     end,
     {_, FeedbackMessage, File} = Feedback,
-    Html = "<div class='" ++ AlertClass ++ "'>" ++ FeedbackMessage ++ "</div>",
+    Html = z_template:render("_mod_cmyk_rgb_feedback.tpl", [{class, AlertClass}, {message, FeedbackMessage}], Context),
     Context2 = z_render:update_selector(".mod-cmyk-rgb-upload-feedback", Html, Context),
     Context3 = case File of
         undefined ->
