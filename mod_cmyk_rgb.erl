@@ -23,11 +23,18 @@ event(#submit{message={upload, []}}, Context) ->
 
     SUB_DIR = "tmp",
     
+    %% Move temporary file to processing directory
+    Dir = z_path:files_subdir_ensure("archive/" ++ SUB_DIR, Context),
+    Target = filename:join([Dir, OriginalFilename]),
+    file:delete(Target),
+    {ok, _} = file:copy(TmpFile, Target),
+    file:delete(TmpFile),
+    
     Feedback = case TmpFile of
         [] ->
             {error, "No file"};
         _ ->
-            Cmd = "identify " ++ z_utils:os_filename(TmpFile),
+            Cmd = "identify " ++ z_utils:os_filename(Target),
             lager:warning("Cmd=~p", [Cmd]),
             ImageInfo = os:cmd(Cmd),
             lager:warning("ImageInfo: ~p", [ImageInfo]),
@@ -39,28 +46,24 @@ event(#submit{message={upload, []}}, Context) ->
                     [_, _, _, _, _, ColorSpace, _, _, _] = Info,
                     case ColorSpace of
                         "RGB" ->
-                            {ok, "File is RGB", undefined};
+                            {ok, "File is already RGB", undefined};
                         "sRGB" ->
-                            {ok, "File is RGB", undefined};
+                            {ok, "File is already RGB", undefined};
                         "CMYK" ->
                             RGBFile = OriginalFilename ++ "-rgb" ++ "." ++ "png",
+                            Dir = z_path:files_subdir_ensure("archive/" ++ SUB_DIR, Context),
+                            OutputTarget = filename:join([Dir, RGBFile]),
                             ConvertCmd = lists:flatten([
                                 "convert ",
-                                TmpFile, " ",
+                                Target, " ",
                                 "-colorspace sRGB ",
-                                RGBFile
+                                OutputTarget
                             ]),
                             lager:warning("ConvertCmd=~p", [ConvertCmd]),
                             % execute imagemagick command
-                            z_media_preview_server:exec(ConvertCmd, RGBFile),
-                            case filelib:is_regular(RGBFile) of
+                            z_media_preview_server:exec(ConvertCmd, OutputTarget),
+                            case filelib:is_regular(OutputTarget) of
                                 true ->
-                                    %% Move temporary file to processing directory
-                                    Dir = z_path:files_subdir_ensure("archive/" ++ SUB_DIR, Context),
-                                    Target = filename:join([Dir, RGBFile]),
-                                    file:delete(Target),
-                                    {ok, _} = file:copy(RGBFile, Target),
-                                    file:delete(RGBFile),
                                     {ok, "Converted CMYK to RGB", RGBFile};
                                 false ->
                                     {error, "Could not convert image to RGB", undefined}
@@ -72,8 +75,8 @@ event(#submit{message={upload, []}}, Context) ->
                     {error, "Error reading file. May not be an image file.", undefined}
             end
         end,
-        
-    file:delete(TmpFile),
+    
+    file:delete(Target),
     
     AlertClass = case Feedback of 
         {ok, _, _} -> "alert alert-success";
@@ -84,7 +87,8 @@ event(#submit{message={upload, []}}, Context) ->
     Html = "<div class='" ++ AlertClass ++ "'>" ++ FeedbackMessage ++ "</div>",
     Context2 = z_render:update_selector(".mod-cmyk-rgb-upload-feedback", Html, Context),
     Context3 = case File of
-        undefined -> Context2;
+        undefined ->
+            Context2;
         File -> 
             lager:warning("download file ~p", [File]),
             z_render:wire({redirect, [{dispatch, "media_attachment"}, {star, SUB_DIR ++ "/" ++ File}]}, Context2)
