@@ -39,9 +39,9 @@ event(#submit{message={upload, []}}, Context) ->
                     [_, _, _, _, _, ColorSpace, _, _, _] = Info,
                     case ColorSpace of
                         "RGB" ->
-                            {ok, "File is RGB", none};
+                            {ok, "File is RGB", undefined};
                         "sRGB" ->
-                            {ok, "File is RGB", none};
+                            {ok, "File is RGB", undefined};
                         "CMYK" ->
                             RGBFile = OriginalFilename ++ "-rgb" ++ "." ++ "png",
                             ConvertCmd = lists:flatten([
@@ -63,13 +63,13 @@ event(#submit{message={upload, []}}, Context) ->
                                     file:delete(RGBFile),
                                     {ok, "Converted CMYK to RGB", RGBFile};
                                 false ->
-                                    {error, "Could not convert image to RGB", none}
+                                    {error, "Could not convert image to RGB", undefined}
                             end;
                         _ ->
-                            {info, "Unknown colorspace, keep as is.", none}
+                            {info, "Unknown colorspace, keep as is.", undefined}
                     end;
                 _ ->
-                    {error, "Error reading file. May not be an image file.", none}
+                    {error, "Error reading file. May not be an image file.", undefined}
             end
         end,
         
@@ -83,9 +83,12 @@ event(#submit{message={upload, []}}, Context) ->
     {_, FeedbackMessage, File} = Feedback,
     Html = "<div class='" ++ AlertClass ++ "'>" ++ FeedbackMessage ++ "</div>",
     Context2 = z_render:update_selector(".mod-cmyk-rgb-upload-feedback", Html, Context),
-    lager:warning("download file ~p", [File]),
-
-    Context3 = z_render:wire({redirect, [{dispatch, "media_attachment"}, {star, SUB_DIR ++ "/" ++ File}]}, Context2),
+    Context3 = case File of
+        undefined -> Context2;
+        File -> 
+            lager:warning("download file ~p", [File]),
+            z_render:wire({redirect, [{dispatch, "media_attachment"}, {star, SUB_DIR ++ "/" ++ File}]}, Context2)
+    end,
     
 %    Archive = z_path:media_archive(Context3),
 %    lager:warning("delete:~p", [Archive ++ File]),
