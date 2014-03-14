@@ -82,9 +82,9 @@ handleImageFormat(Format, ImageInfo, TmpFile, OriginalFilename, SubDir, Context)
     ColorSpace = parseImageMagickInfo(ImageInfo, "Colorspace"),
     case ColorSpace of
         "RGB" ->
-            {ok, "Nothing to do: file is already RGB.", undefined};
+            {info, "Nothing to do: file is already RGB.", undefined};
         "sRGB" ->
-            {ok, "Nothing to do: file is already RGB.", undefined};
+            {info, "Nothing to do: file is already RGB.", undefined};
         "CMYK" ->
             convertImage(TmpFile, OriginalFilename, SubDir, Context);
         _ ->
